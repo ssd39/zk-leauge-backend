@@ -4,9 +4,9 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const cors = require('cors')
 const app = express()
 require('express-ws')(app);
-const port = 8080
+const port = 8081
 const slingShotApi = "http://127.0.0.1:4180"
-const matchQueue = []
+let matchQueue = []
 const userMap = {}
 const gameStates = {}
 
@@ -16,7 +16,7 @@ app.get('/', (req, res) => {
   res.send('Hello World!')
 })
 
-app.ws('/ws', function(ws, req) {
+app.ws('/ws', (ws, req) => {
     let publicAddress = "";
     ws.on('message', (msg) => {
         try{
@@ -34,7 +34,7 @@ app.ws('/ws', function(ws, req) {
                               publicAddress: publicAddress,
                               gameCreator: opponenet,
                               gameId: gameStates[opponenet].id,
-                              character: gameStates[opponenet].c1 === 0 ? 1 : 0
+                              character: gameStates[opponenet].character === 0 ? 1 : 0
                           }
                       ))
                       userMap[opponenet].send(JSON.stringify(
@@ -50,16 +50,26 @@ app.ws('/ws', function(ws, req) {
                           p1: publicAddress,
                           character: Math.floor(Math.random() * 2)
                       }
+                      ws.send(JSON.stringify({type:'game_created', ...gameStates[publicAddress]}))
                   }
               }
             }else{
                 let msgType = msgData.type
-                if(msgType==="gameRecord"){
+                if(msgType==="game_issued" || msgType==="initiate_move" || msgType==="finalize_move"){
                     if(gameStates.hasOwnProperty(publicAddress)){
                         let p2 = gameStates[publicAddress].p2
                         userMap[p2].send(JSON.stringify({
                             type: msgType,
-                            record: msgData.record
+                            txid: msgData.txid,
+                            move_id: msgData.move_id,
+                            winner_id: msgData.winner_id 
+                        }))
+                    }
+                }else if (msgType==="game_accepted" || msgType==="challenge_move"){
+                    if(gameStates.hasOwnProperty(msgData.gameCreator) && gameStates[msgData.gameCreator].p2===publicAddress){
+                        userMap[gameStates[msgData.gameCreator].p1].send(JSON.stringify({
+                            type: msgType,
+                            txid: msgData.txid
                         }))
                     }
                 }
@@ -85,7 +95,9 @@ app.ws('/ws', function(ws, req) {
     })
 })
 
-app.use('/testnet3', createProxyMiddleware({ target: slingShotApi, changeOrigin: true }))
+const TIMEOUT =  1000 * 60 * 1000
+
+app.use('/testnet3', createProxyMiddleware({ target: slingShotApi, changeOrigin: true,   proxyTimeout: TIMEOUT, timeout: TIMEOUT }))
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`)
